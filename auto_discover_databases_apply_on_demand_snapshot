@@ -1,0 +1,53 @@
+Import-Module Rubrik
+$rubrik_ip = 'rubrikclusterip'
+$rubrik_user = 'username'
+$rubrik_pass = 'password'
+$SLA_Name = '4hr-30d-Azure' # Must match the name of the SLA Exactly e.g. Gold.
+Connect-Rubrik -Server $rubrik_ip -Username $rubrik_user -Password $(ConvertTo-SecureString -String $rubrik_pass -AsPlainText -Force) | Out-Null
+
+$DBs = Get-RubrikDatabase -PrimaryClusterID local 
+$check_snap_status = @()
+
+foreach($DB in $DBs){
+
+    if($DB.isRelic -eq "True") {
+
+        # Skip DB Relic
+
+    } else {
+
+        if($DB.effectiveSlaDomainName -eq "Unprotected"){
+
+            write-host "Found DB "$DB.instanceName"\"$DB.name "with SLA" $DB.effectiveSlaDomainName "For host" $DB.rootProperties.rootName
+
+            #### Use this line for testing against a single instance v ####
+            if($DB.rootProperties.rootName -eq "em1-darrswif-w1.rubrikdemo.com"){
+            #### Use this line for testing against a single instace ^ ####
+
+                write-host "Setting SLA to " $SLA_Name
+                Set-RubrikDatabase -id $DB.id -SLA $SLA_Name -confirm:$false
+                write-host "Taking On-Demand Snapshot with SLA " $SLA_Name
+                $snap = New-RubrikSnapshot -id $DB.id -SLA $SLA_Name -Confirm:$false
+                $check_snap_status += $snap.id
+
+            #### Hash this Bracket to remove test v ####
+            }
+            #### Hash this Bracket to remove test ^ ####
+
+        }
+    }
+}
+
+# Validate all snaps completed
+
+foreach($snap in $check_snap_status){
+
+    $Request = Get-RubrikRequest -id $snap -type mssql
+
+    do {
+
+        write-host $Request.status $Request.id
+        $Request = Get-RubrikRequest -id $snap -type mssql
+        start-sleep -Seconds 10
+            
+    } while($Request.status -ne "QUEUED" -and $Request.status -ne "SUCCEEDED" -and $Request.status -ne "InProgress")
